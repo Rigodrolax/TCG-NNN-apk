@@ -1,0 +1,59 @@
+plugins {
+    id 'com.android.application'
+}
+
+// Version de l'appli : donnée par GitHub Actions (version.txt et numéro de build), sinon valeurs par défaut
+def appVersionCode = (System.getenv('NNN_VERSION_CODE') ?: '1') as int
+def appVersionName = System.getenv('NNN_VERSION_NAME') ?: '1.0.0'
+
+android {
+    namespace 'fr.kheys.cartesnnn'
+    compileSdk 35
+
+    defaultConfig {
+        applicationId 'fr.kheys.cartesnnn'
+        minSdk 24
+        targetSdk 35
+        versionCode appVersionCode
+        versionName appVersionName
+    }
+
+    // Signature : la clé vient des secrets GitHub (NNN_KEYSTORE_B64 et NNN_KEYSTORE_PASS).
+    // Toujours la même clé, sinon Android refuse d'installer une mise à jour par-dessus l'ancienne appli.
+    signingConfigs {
+        release {
+            def ks = System.getenv('NNN_KEYSTORE_FILE')
+            if (ks) {
+                storeFile file(ks)
+                storePassword System.getenv('NNN_KEYSTORE_PASS')
+                keyAlias 'cartesnnn'
+                keyPassword System.getenv('NNN_KEYSTORE_PASS')
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            signingConfig System.getenv('NNN_KEYSTORE_FILE') ? signingConfigs.release : signingConfigs.debug
+        }
+    }
+
+    buildFeatures {
+        buildConfig true
+    }
+
+    // le jeu (gros fichier texte) est rangé tel quel dans l'APK
+    androidResources {
+        noCompress 'js'
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+
+dependencies {
+    implementation 'androidx.webkit:webkit:1.12.1'
+}
