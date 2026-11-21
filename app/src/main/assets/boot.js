@@ -1,5 +1,5 @@
 /* Cartes NNN — appli Android.
- * Ce petit script est posé par l'appli sur les pages des forums de jeuxvideo.com.
+ * Ce petit script est chargé par la page de l'appli (app.html).
  * Il remplace Tampermonkey : il fournit au jeu les mêmes fonctions (GM_getValue, GM_setValue, GM_xmlhttpRequest…)
  * puis charge le jeu, qui est exactement le même fichier que le script du PC. */
 (function () {
@@ -106,6 +106,7 @@
     var s = document.createElement('script'), ok = false;
     s.src = '/__nnnapp__/game.js';
     s.onload = function () { ok = true; };
+    var w = setInterval(function () { if (window.__nnnGameRan) { clearInterval(w); if (window.nnnAfterGame) window.nnnAfterGame(); } }, 300);
     s.onerror = function () { ok = true; if (!window.__nnnGameStarted) send({ t: 'inject' }); };
     (document.body || document.documentElement).appendChild(s);
     setTimeout(function () { if (!ok && !window.__nnnGameStarted) send({ t: 'inject' }); }, 45000);
@@ -115,10 +116,10 @@
     restoreCb = function (vals) {
       restoreCb = null;
       try { for (var k in vals) if (localStorage.getItem(P + k) == null) localStorage.setItem(P + k, vals[k]); } catch (e) {}
-      load();
+      if (window.nnnBeforeGame) window.nnnBeforeGame(load); else load();
     };
     send({ t: 'restore' });
-    setTimeout(function () { if (restoreCb) { restoreCb = null; load(); } }, 2500);
+    setTimeout(function () { if (restoreCb) restoreCb({}); }, 2500);
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot); else boot();
 })();

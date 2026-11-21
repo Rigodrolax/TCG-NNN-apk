@@ -52,13 +52,16 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 /**
- * Cartes NNN : le topic NNN de jeuxvideo.com avec le jeu de cartes intégré.
- * L'appli fait le travail de Tampermonkey : elle pose le jeu (le même fichier que le script du PC) sur les pages du forum,
- * garde les données du jeu, et fait les requêtes réseau (Firebase pour le mode en ligne, NoelShack…).
+ * Cartes NNN : le jeu de cartes du topic NNN, seul (sans le forum).
+ * L'appli fait le travail de Tampermonkey : elle lance le jeu (le même fichier que le script du PC) dans sa propre page,
+ * garde les données du jeu, lit le topic NNN en arrière-plan pour compter les messages du joueur,
+ * et fait les requêtes réseau (Firebase pour le mode en ligne, NoelShack…).
  * Le jeu se met à jour tout seul depuis GitHub : pas besoin de réinstaller l'appli à chaque nouvelle version.
  */
 public class MainActivity extends Activity {
-    private static final String TOPIC = "https://www.jeuxvideo.com/forums/42-51-77479206-1-0-1-0-officiel.htm";
+    // la page de l'appli : servie par l'appli elle-même (rien n'est chargé depuis le forum), à une adresse du topic NNN pour que le jeu s'y lance
+    private static final String APP_PATH = "/forums/42-51-77479206-1-0-1-0-cartes-nnn-appli.htm";
+    private static final String APP_URL = "https://www.jeuxvideo.com" + APP_PATH;
     private static final String GAME_RAW = "https://raw.githubusercontent.com/Rigodrolax/TCG-NNN/main/nnn-cartes-balade92.user.js";
     private static final String ORIGIN = "https://www.jeuxvideo.com";
     private static final String GAME_PATH = "/__nnnapp__/game.js";
@@ -68,7 +71,7 @@ public class MainActivity extends Activity {
 
     private WebView web;
     private SharedPreferences store, meta;
-    private String bootJs, userAgent = "";
+    private String userAgent = "";
     private ValueCallback<Uri[]> fileCb;
     private final ExecutorService pool = Executors.newFixedThreadPool(4);
 
@@ -78,7 +81,6 @@ public class MainActivity extends Activity {
         super.onCreate(savedInstanceState);
         store = getSharedPreferences("gm", MODE_PRIVATE);     // copie des données du jeu
         meta = getSharedPreferences("app", MODE_PRIVATE);     // version du jeu téléchargée
-        try { bootJs = new String(readAll(getAssets().open("boot.js")), StandardCharsets.UTF_8); } catch (Exception e) { bootJs = ""; }
 
         web = new WebView(this);
         WebSettings s = web.getSettings();
@@ -110,26 +112,23 @@ public class MainActivity extends Activity {
             @Override
             public WebResourceResponse shouldInterceptRequest(@NonNull WebView view, @NonNull WebResourceRequest request) {
                 Uri u = request.getUrl();
-                if ("www.jeuxvideo.com".equals(u.getHost()) && GAME_PATH.equals(u.getPath())) return gameResponse();
+                if (!"www.jeuxvideo.com".equals(u.getHost())) return null;
+                String path = u.getPath() == null ? "" : u.getPath();
+                if (GAME_PATH.equals(path)) return gameResponse();
+                if (APP_PATH.equals(path)) return asset("app.html", "text/html");
+                if ("/__nnnapp__/boot.js".equals(path)) return asset("boot.js", "application/javascript");
+                if (request.isForMainFrame()) return asset("app.html", "text/html");   // jamais de page du forum dans l'appli
                 return null;
             }
 
             @Override
             public boolean shouldOverrideUrlLoading(@NonNull WebView view, @NonNull WebResourceRequest request) {
                 Uri u = request.getUrl();
-                String h = u.getHost() == null ? "" : u.getHost();
-                String sc = u.getScheme() == null ? "" : u.getScheme();
-                if ((sc.equals("https") || sc.equals("http")) && (h.equals("jeuxvideo.com") || h.endsWith(".jeuxvideo.com"))) return false;
-                // autres sites (NoelShack, YouTube, liens des messages…) : dans le navigateur du téléphone
+                if ("www.jeuxvideo.com".equals(u.getHost()) && APP_PATH.equals(u.getPath())) return false;
+                // tout autre lien (profil de Balade92, NoelShack…) : dans le navigateur du téléphone
                 openOutside(u);
                 return true;
             }
-
-            @Override
-            public void onPageCommitVisible(WebView view, String url) { injectBoot(); }
-
-            @Override
-            public void onPageFinished(WebView view, String url) { injectBoot(); }
         });
 
         web.setWebChromeClient(new WebChromeClient() {
@@ -156,12 +155,8 @@ public class MainActivity extends Activity {
 
         setContentView(web);
         if (savedInstanceState != null) web.restoreState(savedInstanceState);
-        else web.loadUrl(TOPIC);
+        else web.loadUrl(APP_URL);
         checkGameUpdate();
-    }
-
-    private void injectBoot() {
-        if (web != null && !bootJs.isEmpty()) web.evaluateJavascript(bootJs, null);
     }
 
     private void openOutside(Uri u) {
@@ -178,6 +173,16 @@ public class MainActivity extends Activity {
         File f = new File(getFilesDir(), "game.user.js");
         if (f.exists() && f.length() > 1_000_000) return new FileInputStream(f);
         return getAssets().open("game.user.js");
+    }
+
+    private WebResourceResponse asset(String name, String mime) {
+        try {
+            Map<String, String> h = new HashMap<>();
+            h.put("Cache-Control", "no-store");
+            return new WebResourceResponse(mime, "utf-8", 200, "OK", h, getAssets().open(name));
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     private WebResourceResponse gameResponse() {
@@ -425,8 +430,7 @@ public class MainActivity extends Activity {
         if (web == null) { super.onBackPressed(); return; }
         web.evaluateJavascript("window.nnnAppBack ? window.nnnAppBack() : 'nav'", (res) -> {
             if (res != null && res.contains("ok")) return;
-            if (web.canGoBack()) web.goBack();
-            else moveTaskToBack(true);
+            moveTaskToBack(true);
         });
     }
 

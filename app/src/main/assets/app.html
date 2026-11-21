@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Cartes NNN</title>
+<style>
+  html, body { margin: 0; height: 100%; background: radial-gradient(circle at 50% 30%, #2c1f4d, #0f0d17 75%); color: #ece9f5; font: 15px/1.4 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+  #home { min-height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; padding: 24px; box-sizing: border-box; text-align: center; }
+  #home h1 { margin: 0; font-size: 28px; font-weight: 900; }
+  #home .who { color: #b9b3d1; }
+  #home .who b { color: #fff; }
+  .btn { border: 0; border-radius: 14px; padding: 14px 22px; font: 800 17px system-ui, sans-serif; cursor: pointer; }
+  .gold { background: linear-gradient(#ffd25a, #f0a81a); color: #2a1a00; box-shadow: 0 6px 20px rgba(255, 190, 60, .35); }
+  .ghost { background: rgba(255, 255, 255, .08); color: #e2def0; font-size: 14px; padding: 9px 14px; }
+  #status { font-size: 13px; color: #8f89aa; max-width: 340px; }
+  #ask { position: fixed; inset: 0; background: rgba(8, 8, 12, .92); display: none; align-items: center; justify-content: center; z-index: 2147483647; padding: 20px; }
+  #ask.on { display: flex; }
+  #ask form { background: #1b1c24; border: 1px solid #3a3b48; border-radius: 16px; padding: 22px; max-width: 340px; width: 100%; display: flex; flex-direction: column; gap: 12px; }
+  #ask h2 { margin: 0; font-size: 20px; }
+  #ask p { margin: 0; color: #b9b3d1; font-size: 14px; }
+  #ask input { padding: 12px; border-radius: 10px; border: 1px solid #4a4466; background: #141020; color: #fff; font: 600 16px system-ui, sans-serif; }
+  #nnn-topic { display: none; }
+</style>
+</head>
+<body>
+<!-- pseudo du joueur : le jeu le lit ici, comme sur le forum -->
+<div class="headerAccount__pseudo" hidden></div>
+<div id="home">
+  <h1>🎴 Cartes NNN 2026</h1>
+  <div class="who">Joueur : <b id="who">…</b> <button class="btn ghost" id="chg" type="button">Changer</button></div>
+  <button class="btn gold" id="open" type="button" disabled>Chargement du jeu…</button>
+  <div id="status">Tes messages sur le topic NNN sont comptés automatiquement pour tes boosters.</div>
+</div>
+<div id="ask"><form>
+  <h2>Ton pseudo jeuxvideo.com</h2>
+  <p>Écris ton pseudo exactement comme sur le forum. Il sert pour le mode en ligne et pour compter tes messages du topic NNN (1 booster tous les 40 messages).</p>
+  <input name="p" maxlength="15" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Pseudo" required>
+  <button class="btn gold" type="submit">Valider</button>
+</form></div>
+<!-- messages du topic NNN, lus en arrière-plan (invisibles) : le jeu y compte les tiens -->
+<div id="nnn-topic"></div>
+<script>
+(function () {
+  var TOPIC = '77479206', BASE = 'https://www.jeuxvideo.com/forums/42-51-' + TOPIC + '-';
+  var who = document.getElementById('who'), hdr = document.querySelector('.headerAccount__pseudo'), ask = document.getElementById('ask');
+  var openBtn = document.getElementById('open'), status = document.getElementById('status');
+  function pseudo() { try { return JSON.parse(localStorage.getItem('nnnapp:nnn_pseudo') || 'null'); } catch (e) { return null; } }
+  function show() { var p = pseudo() || ''; hdr.textContent = p; who.textContent = p || '—'; }
+  function askPseudo(then) {
+    var f = ask.querySelector('form'), i = f.querySelector('input');
+    i.value = pseudo() || '';
+    ask.classList.add('on'); setTimeout(function () { i.focus(); }, 50);
+    f.onsubmit = function (e) {
+      e.preventDefault();
+      var v = i.value.trim().replace(/\s+/g, '');
+      if (!/^[A-Za-z0-9_\-\[\]]{3,15}$/.test(v)) { i.style.borderColor = '#e0302a'; return; }
+      window.GM_setValue('nnn_pseudo', v); show(); ask.classList.remove('on');
+      if (then) { var t = then; then = null; t(); } else location.reload();
+    };
+  }
+  document.getElementById('chg').onclick = function () { askPseudo(null); };
+  // appelé par boot.js juste avant de lancer le jeu
+  window.nnnBeforeGame = function (go) { show(); if (pseudo()) go(); else askPseudo(go); };
+  // appelé quand le jeu est chargé
+  window.nnnAfterGame = function () {
+    openBtn.disabled = false; openBtn.textContent = 'Ouvrir le jeu';
+    openBtn.onclick = function () { var f = document.querySelector('.bb-fab'); if (f) f.click(); };
+    setTimeout(function () { openBtn.onclick(); }, 300);
+    poll(); setInterval(poll, 120000); window.nnnPoll = poll;
+  };
+  // ---- lecture du topic NNN (dernières pages) ----
+  function get(url) {
+    return new Promise(function (res) {
+      window.GM_xmlhttpRequest({ method: 'GET', url: url, timeout: 20000,
+        onload: function (r) { res(r.status === 200 ? r.responseText : null); }, onerror: function () { res(null); }, ontimeout: function () { res(null); } });
+    });
+  }
+  function parse(html) { return new DOMParser().parseFromString(html, 'text/html'); }
+  function lastPage(doc) {
+    var n = 1, re = new RegExp('-' + TOPIC + '-(\\d+)-');
+    doc.querySelectorAll('a[href]').forEach(function (a) { var m = re.exec(a.getAttribute('href')); if (m) n = Math.max(n, +m[1]); });
+    return n;
+  }
+  function msgs(doc) {
+    var out = [];
+    doc.querySelectorAll('.bloc-message-forum, .messageUser').forEach(function (m) {
+      if (m.parentElement && m.parentElement.closest('.bloc-message-forum, .messageUser')) return;
+      m.querySelectorAll('iframe, video, audio, script, source').forEach(function (x) { x.remove(); });
+      m.querySelectorAll('img').forEach(function (x) { x.removeAttribute('src'); x.removeAttribute('srcset'); x.removeAttribute('data-src'); });   // rien à télécharger
+      out.push(document.importNode(m, true));
+    });
+    return out;
+  }
+  var busy = false, known = 0;
+  function poll() {
+    if (busy || !pseudo()) return; busy = true;
+    get(BASE + '1-0-1-0-a.htm').then(function (h) {
+      if (!h) throw 0;
+      var d1 = parse(h), last = Math.max(lastPage(d1), known); known = last;
+      var pages = [last]; if (last > 1) pages.unshift(last - 1);
+      return Promise.all(pages.map(function (p) { return p === 1 ? Promise.resolve(h) : get(BASE + p + '-0-1-0-a.htm'); })).then(function (hs) {
+        var box = document.getElementById('nnn-topic'), frag = document.createDocumentFragment(), n = 0;
+        hs.forEach(function (x) { if (x) msgs(parse(x)).forEach(function (m) { frag.appendChild(m); n++; }); });
+        if (!n) throw 0;
+        box.innerHTML = ''; box.appendChild(frag);
+        status.textContent = 'Topic NNN lu (page ' + last + ') : tes nouveaux messages comptent pour tes boosters. Vérifié à ' + new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) + '.';
+      });
+    }).catch(function () {
+      status.textContent = 'Impossible de lire le topic NNN pour le moment (connexion ?). Nouvel essai dans 2 minutes.';
+    }).then(function () { busy = false; });
+  }
+})();
+</script>
+<script src="/__nnnapp__/boot.js"></script>
+</body>
+</html>
